@@ -16,6 +16,8 @@
 
 import argparse
 import logging
+import csv
+from dataclasses import dataclass
 from datetime import timedelta
 import time
 
@@ -27,6 +29,13 @@ from selenium.webdriver.support import expected_conditions as EC
 
 logging.basicConfig(level=logging.WARN)
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TranscriptEntry:
+    speaker: str
+    text: str
+    start_time: int
 
 
 def getTranscriptChunk(tds, browser):
@@ -57,6 +66,8 @@ def getTranscriptChunk(tds, browser):
             logger.debug("short transcript only")
         # Grab the short transcript <p> element and the text shall set you free
         short_transcript = td.find_element(By.CLASS_NAME, "short_transcript")
+        speaker = short_transcript.find_element(By.XPATH, "./preceding-sibling::strong")
+        # print(speaker.text)
         logger.debug("short_transcript_text='%s'", short_transcript.text)
         transcriptChunk.append(short_transcript.text.strip())
 
@@ -96,6 +107,11 @@ def faveOutput(chunks, times):
     return "\n".join(rows)
 
 
+def get_speaker(row, browser):
+    speaker = row.find_element(By.TAG_NAME, "strong")
+    return speaker.text
+
+
 def main(url, outName):
     ffops = webdriver.FirefoxOptions()
     ffops.headless = True
@@ -109,21 +125,30 @@ def main(url, outName):
 
     sec = browser.find_element(By.CLASS_NAME, "transcript")
     rows = sec.find_elements(By.TAG_NAME, "tr")
+    transcript_entries: TranscriptEntry = []
     transcript = []
     times = []
-    for row in rows:
-        tds = row.find_elements(By.TAG_NAME, "td")
-        chunk = getTranscriptChunk(tds, browser)
-        time = getTimestamp(row)
-        transcript.append(chunk)
-        times.append(time)
-    browser.close()
+    try:
+        for row in rows:
+            tds = row.find_elements(By.TAG_NAME, "td")
+            speaker = get_speaker(row, browser)
+            chunk = getTranscriptChunk(tds, browser)
+            time = getTimestamp(row)
+            transcript.append(chunk)
+            times.append(time)
+            te = TranscriptEntry(speaker=speaker, text=chunk, start_time=time)
+            transcript_entries.append(te)
+    finally:
+        browser.close()
     times.append(duration)
 
-    outText = faveOutput(transcript, times)
+    # outText = faveOutput(transcript, times)
 
     with open(outName, "w") as f:
-        f.write(outText)
+        csvwriter = csv.writer(f)
+        for te in transcript_entries:
+            # f.write(f"{te.start_time}, {te.speaker}, {te.text}\n")
+            csvwriter.writerow([te.start_time, te.speaker, te.text])
 
 
 if __name__ == "__main__":
